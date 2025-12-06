@@ -1,73 +1,125 @@
 import streamlit as st
-from openai import OpenAI
+import time
+import random
 
-# Sayfa Düzeni
-st.set_page_config(page_title="AI Gümrük Hesaplayıcı", page_icon="🌍", layout="centered")
+# Sayfa Ayarları
+st.set_page_config(page_title="Gümrük Hesaplayıcı (Demo)", page_icon="🚢", layout="centered")
 
-# Başlıklar
-st.title("🌍 Yapay Zeka Gümrük Vergisi Hesaplayıcı")
-st.markdown("Bu araç, ürününüzün **GTİP kodunu** tahmin eder ve **tahmini maliyet** çıkarır.")
-st.warning("⚠️ YASAL UYARI: Bu sonuçlar yapay zeka tahminidir. Kesin bilgi için gümrük müşavirine danışınız.")
+# --- BAŞLIK KISMI ---
+st.title("🚢 İhracat/İthalat Vergi Hesaplayıcı")
+st.markdown("""
+Bu araç, ürün detaylarına göre **Tahmini Gümrük Maliyeti** ve **GTİP Analizi** yapar.
+*Veriler güncel mevzuat simülasyonudur.*
+""")
 
-# Yan Menü (API Key Girişi)
+# --- SOL MENÜ ---
 with st.sidebar:
-    st.header("Ayarlar")
-    api_key = st.text_input("OpenAI API Anahtarı", type="password", help="OpenAI sitesinden alacağınız sk-... ile başlayan kod.")
-    st.markdown("[API Anahtarı Nereden Alınır?](https://platform.openai.com/api-keys)")
-    st.info("Not: API anahtarınız kaydedilmez, sadece işlem anında kullanılır.")
+    st.header("⚙️ Operasyon Detayları")
+    st.info("Bu sürüm Demo modundadır. API anahtarı gerektirmez.")
+    doviz = st.radio("Para Birimi", ["USD ($)", "EUR (€)"])
 
-# Ana Form
-with st.form("gumruk_formu"):
+# --- ANA FORM ---
+with st.form("hesaplama_formu"):
     col1, col2 = st.columns(2)
     with col1:
-        cikis_ulkesi = st.text_input("Çıkış Ülkesi", "Türkiye")
+        cikis = st.selectbox("Çıkış Ülkesi", ["Türkiye", "Çin", "Almanya", "ABD"])
     with col2:
-        varis_ulkesi = st.text_input("Varış Ülkesi", "Almanya")
+        varis = st.selectbox("Varış Ülkesi", ["Almanya (AB)", "İngiltere", "ABD", "Türkiye"])
     
-    urun = st.text_area("Ürün Tanımı (Ne kadar detay, o kadar iyi)", "Örn: %100 Pamuklu örme erkek tişörtü, 250 gram")
-    fiyat = st.number_input("Ürün Fatura Değeri (USD)", min_value=1, value=5000)
+    urun_adi = st.text_input("Ürün Nedir?", placeholder="Örn: Pamuklu Tişört, Zeytinyağı, Makine Parçası...")
+    fiyat = st.number_input(f"Fatura Tutarı ({doviz})", min_value=100, value=5000)
     
-    hesapla = st.form_submit_button("💰 Vergiyi ve Maliyeti Hesapla")
+    hesapla_btn = st.form_submit_button("Analizi Başlat")
 
-# Hesaplama Mantığı
-if hesapla:
-    if not api_key:
-        st.error("Lütfen sol menüden OpenAI API Anahtarınızı giriniz!")
+# --- HESAPLAMA MOTORU (YAPAY ZEKA TAKLİDİ) ---
+def analizi_yap(urun, tutar, hedef_ulke):
+    # Girilen metni küçült (büyük-küçük harf duyarlılığı için)
+    text = urun.lower()
+    
+    # Varsayılan değerler
+    gtip = "Diğer - 9999.99"
+    gumruk_orani = 5  # %5 genel
+    kdv_orani = 19    # %19 genel
+    notlar = "Genel ticaret ürünü."
+    risk = "Düşük"
+
+    # --- SİMÜLASYON KURALLARI ---
+    # 1. Tekstil Ürünleri
+    if any(x in text for x in ["tişört", "tekstil", "kumaş", "pantolon", "gömlek", "pamuk"]):
+        gtip = "6109.10 (Örme Giyim)"
+        gumruk_orani = 12
+        notlar = "Tekstil ürünlerinde 'Menşe Şahadetnamesi' kritiktir. Azo boyar madde testi gerekebilir."
+        risk = "Orta (Test Gerekliliği)"
+    
+    # 2. Gıda Ürünleri
+    elif any(x in text for x in ["gıda", "zeytinyağı", "fındık", "bisküvi", "meyve"]):
+        gtip = "1509.20 (Bitkisel Yağlar / Gıda)"
+        gumruk_orani = 0  # Genelde gıdada vergi düşüktür ama analiz şarttır
+        kdv_orani = 7
+        notlar = "Sağlık sertifikası ve karantina kontrolü zorunludur. Soğuk zincir gerektirebilir."
+        risk = "Yüksek (Bozulabilir Ürün)"
+
+    # 3. Elektronik
+    elif any(x in text for x in ["telefon", "bilgisayar", "elektronik", "devre", "kablo"]):
+        gtip = "8517.13 (Elektronik Cihazlar)"
+        gumruk_orani = 0  # Teknoloji ürünlerinde genelde vergi yoktur (ITA anlaşması)
+        notlar = "CE belgesi ve RoHS uygunluğu kesinlikle gereklidir."
+        risk = "Orta"
+
+    # 4. Makine / Metal
+    elif any(x in text for x in ["makine", "çelik", "demir", "yedek parça", "motor"]):
+        gtip = "8407.34 (Motor ve Aksam)"
+        gumruk_orani = 2.7
+        notlar = "Sanayi ürünü. ATR belgesi varsa AB ülkelerine vergi %0 olur."
+    
+    # Hedef Ülke AB ise ve Çıkış Türkiye ise (Gümrük Birliği)
+    if hedef_ulke == "Almanya (AB)" and cikis == "Türkiye":
+        if gumruk_orani > 0:
+            notlar += " (Türkiye-AB Gümrük Birliği kapsamında ATR ile vergi %0'a düşebilir!)"
+            gumruk_orani = 0  # ATR etkisi simülasyonu
+
+    # Hesaplamalar
+    gumruk_tutari = tutar * (gumruk_orani / 100)
+    matrah = tutar + gumruk_tutari
+    kdv_tutari = matrah * (kdv_orani / 100)
+    toplam_maliyet = tutar + gumruk_tutari + kdv_tutari
+
+    return {
+        "gtip": gtip,
+        "gumruk_orani": gumruk_orani,
+        "gumruk_tutari": gumruk_tutari,
+        "kdv_orani": kdv_orani,
+        "kdv_tutari": kdv_tutari,
+        "toplam": toplam_maliyet,
+        "not": notlar,
+        "risk": risk
+    }
+
+# --- SONUÇLARI GÖSTERME ---
+if hesapla_btn:
+    if len(urun_adi) < 3:
+        st.error("Lütfen geçerli bir ürün adı giriniz.")
     else:
-        try:
-            client = OpenAI(api_key=api_key)
-            with st.spinner('Yapay zeka mevzuatları tarıyor...'):
-                
-                prompt = f"""
-                Sen uzman bir gümrük müşavirisini. Aşağıdaki ticari işlem için bir analiz yap.
-                
-                Ürün: {urun}
-                Çıkış: {cikis_ulkesi} -> Varış: {varis_ulkesi}
-                Mal Bedeli: {fiyat} USD
-                
-                Lütfen şu formatta, TÜRKÇE ve tablo şeklinde yanıt ver:
-                1. Tahmini GTİP (HS Code): (En uygun 6 haneli kodu bul)
-                2. Gümrük Vergisi Oranı: (Varış ülkesi standartlarına göre tahmini %)
-                3. KDV Oranı: (Varış ülkesi standartlarına göre tahmini %)
-                4. Ek Vergiler: (Varsa anti-damping vb.)
-                5. MALİYET TABLOSU:
-                   - Mal Bedeli:
-                   - Tahmini Gümrük Vergisi Tutarı:
-                   - Tahmini KDV Tutarı:
-                   - TOPLAM TAHMİNİ MALİYET (Landed Cost):
-                
-                Son olarak ihracatçının dikkat etmesi gereken 1 kritik belgeyi söyle (ATR, EUR1 vs.)
-                """
-                
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                
-                sonuc = response.choices[0].message.content
-                
-                st.success("✅ Analiz Tamamlandı")
-                st.markdown(sonuc)
-                
-        except Exception as e:
-            st.error(f"Bir hata oluştu. API Anahtarınızı veya bakiyenizi kontrol edin. Hata: {e}")
+        # Sanki AI düşünüyormuş gibi bekleme efekti verelim
+        with st.spinner('Veritabanı taranıyor ve mevzuat kontrol ediliyor...'):
+            time.sleep(2) # 2 saniye bekle
+            sonuc = analizi_yap(urun_adi, fiyat, varis)
+        
+        st.success("✅ Analiz Başarıyla Tamamlandı!")
+        
+        # Sonuç Kartları
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Tahmini GTİP", sonuc["gtip"])
+        c2.metric("Gümrük Vergisi", f"%{sonuc['gumruk_orani']}")
+        c3.metric("Tahmini Risk", sonuc["risk"])
+        
+        st.markdown("---")
+        
+        # Maliyet Tablosu
+        st.subheader("💰 Maliyet Dökümü")
+        st.write(f"**Mal Bedeli:** {fiyat:,.2f} {doviz}")
+        st.write(f"**+ Gümrük Vergisi:** {sonuc['gumruk_tutari']:,.2f} {doviz}")
+        st.write(f"**+ KDV (İthalat):** {sonuc['kdv_tutari']:,.2f} {doviz}")
+        st.markdown(f"### = Toplam Tahmini Maliyet: {sonuc['toplam']:,.2f} {doviz}")
+        
+        st.info(f"💡 **Uzman Notu:** {sonuc['not']}")
