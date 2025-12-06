@@ -118,4 +118,10 @@ else:
     st.info("👈 Lütfen sol menüden Excel dosyanızı yükleyin.")
     st.markdown("""
     ### Excel Dosyanız Nasıl Olmalı?
-    Aşağıdaki sütun
+    Aşağıdaki sütun başlıklarını içeren bir Excel hazırlayın:
+    
+    | Urun_Adi | GTIP | Gumruk_Vergisi | Ilave_Gumruk_Vergisi | OTV | KDV |
+    | :--- | :--- | :--- | :--- | :--- | :--- |
+    | Pamuklu Tişört | 6109.10 | 12 | 20 | 0 | 10 |
+    | Akıllı Telefon | 8517.13 | 0 | 0 | 50 | 20 |
+    """)
